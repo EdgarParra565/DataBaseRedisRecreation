@@ -15,6 +15,7 @@ const (
 	ARRAY   = '*'
 )
 
+// Value represents a parsed RESP value.
 type Value struct {
 	typ   string  //Used to determine the data type carried by the value
 	str   string  // Holds the value of the string received
@@ -23,6 +24,7 @@ type Value struct {
 	array []Value //Holds all the values received
 }
 
+// Resp reads and parses RESP values from a buffered stream.
 type Resp struct {
 	reader *bufio.Reader
 }
@@ -121,6 +123,7 @@ func (r *Resp) readArray() (Value, error) {
 	return v, nil
 }
 
+// Marshal converts a Value into its RESP byte representation.
 func (v Value) Marshal() []byte {
 	switch v.typ {
 	case "array":
@@ -138,6 +141,7 @@ func (v Value) Marshal() []byte {
 	}
 }
 
+// marshalArray converts an array value into RESP array bytes.
 func (v *Value) marshalArray() []byte {
 	len := len(v.array)
 	var bytes []byte
@@ -152,6 +156,7 @@ func (v *Value) marshalArray() []byte {
 	return bytes
 }
 
+// marshalBulk converts a bulk string value into RESP bulk string bytes.
 func (v *Value) marshalBulk() []byte {
 	var bytes []byte
 	bytes = append(bytes, BULK)
@@ -163,6 +168,7 @@ func (v *Value) marshalBulk() []byte {
 	return bytes
 }
 
+// marshalString converts a simple string value into RESP string bytes.
 func (v *Value) marshalString() []byte {
 	var bytes []byte
 	bytes = append(bytes, STRING)
@@ -172,6 +178,7 @@ func (v *Value) marshalString() []byte {
 	return bytes
 }
 
+// marshalNull converts a null value into RESP null bytes.
 func (v *Value) marshalNull() []byte {
 	var bytes []byte
 	bytes = append(bytes, ERROR)
@@ -181,18 +188,22 @@ func (v *Value) marshalNull() []byte {
 	return bytes
 }
 
+// marshalError converts an error value into RESP error bytes.
 func (v *Value) marshalError() []byte {
 	return []byte("ERROR")
 }
 
+// Writer writes RESP values to an output stream.
 type Writer struct {
 	writer io.Writer
 }
 
+// NewWriter creates a RESP writer for the provided output stream.
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{writer: w}
 }
 
+// Write marshals and writes a RESP value to the output stream.
 func (w *Writer) Write(v Value) error {
 	var bytes = v.Marshal()
 

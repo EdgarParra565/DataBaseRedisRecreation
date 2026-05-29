@@ -2,17 +2,25 @@ package main
 
 import "sync"
 
+// Handlers maps Redis command names to their command functions.
 var Handlers = map[string]func([]Value) Value{
 	"PING": ping,
 	"SET":  set,
 	"GET":  get,
+	"HSET": hset,
+	"HGET": hget,
+	//"HGETALL": hgetall,
 }
 
+// ping returns a PONG response for the PING command.
 func ping(args []Value) Value {
 	return Value{typ: "string", str: "PONG"}
 }
 
+// SETs stores string keys and values for SET and GET commands.
 var SETs = map[string]string{}
+
+// SETsMu protects concurrent access to SETs.
 var SETsMu = sync.RWMutex{}
 
 // set is a Hash Map method that stores a value and sets a key equal to it
@@ -44,6 +52,51 @@ func get(args []Value) Value {
 
 	if !ok {
 		return Value{typ: "null", str: "Key not found"}
+	}
+
+	return Value{typ: "bulk", bulk: value}
+}
+
+// HSETs stores hash names with their field and value mappings.
+var HSETs = map[string]map[string]string{}
+
+// HSETsMu protects concurrent access to HSETs.
+var HSETsMu = sync.RWMutex{}
+
+// hset stores a field value inside a hash.
+func hset(args []Value) Value {
+	if len(args) != 3 {
+		return Value{typ: "error", str: "Too many arguments"}
+	}
+	hash := args[0].bulk
+	key := args[1].bulk
+	value := args[2].bulk
+
+	HSETsMu.Lock()
+	if _, ok := HSETs[hash]; !ok {
+		HSETs[hash] = map[string]string{}
+	}
+
+	HSETs[hash][key] = value
+	HSETsMu.Unlock()
+
+	return Value{typ: "string", str: "OK"}
+}
+
+// hget returns a field value from a hash.
+func hget(args []Value) Value {
+	if len(args) != 2 {
+		return Value{typ: "error", str: "Too many arguments"}
+	}
+	hash := args[0].bulk
+	key := args[1].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash][key]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
 	}
 
 	return Value{typ: "bulk", bulk: value}
