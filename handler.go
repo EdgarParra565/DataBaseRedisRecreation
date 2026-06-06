@@ -4,11 +4,12 @@ import "sync"
 
 // Handlers maps Redis command names to their command functions.
 var Handlers = map[string]func([]Value) Value{
-	"PING": ping,
-	"SET":  set,
-	"GET":  get,
-	"HSET": hset,
-	"HGET": hget,
+	"PING":   ping,
+	"SET":    set,
+	"GET":    get,
+	"HSET":   hset,
+	"HGET":   hget,
+	"EXISTS": exists,
 	//"HGETALL": hgetall,
 }
 
@@ -23,7 +24,7 @@ var SETs = map[string]string{}
 // SETsMu protects concurrent access to SETs.
 var SETsMu = sync.RWMutex{}
 
-// set is a Hash Map method that stores a value and sets a key equal to it
+// set stores a string value by key.
 func set(args []Value) Value {
 	if len(args) != 2 {
 		return Value{typ: "error", str: "Too many arguments"}
@@ -38,7 +39,7 @@ func set(args []Value) Value {
 	return Value{typ: "string", str: "OK"}
 }
 
-// get is a Hash Map method that takes a key and returns the value
+// get returns the string value stored at a key.
 func get(args []Value) Value {
 	if len(args) != 1 {
 		return Value{typ: "error", str: "Invalid number of args for get"}
@@ -100,4 +101,25 @@ func hget(args []Value) Value {
 	}
 
 	return Value{typ: "bulk", bulk: value}
+}
+
+// exists returns 1 when a string key or hash key exists, otherwise 0.
+func exists(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "Too many arguments"}
+	}
+	key := args[0].bulk
+	SETsMu.RLock()
+	_, stringExists := SETs[key]
+	SETsMu.RUnlock()
+
+	HSETsMu.RLock()
+	_, hashExists := HSETs[key]
+	HSETsMu.RUnlock()
+
+	if stringExists || hashExists {
+		return Value{typ: "integer", num: 1}
+	}
+
+	return Value{typ: "integer", num: 0}
 }

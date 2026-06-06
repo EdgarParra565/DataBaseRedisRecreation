@@ -1,0 +1,47 @@
+DataBaseRedisRecreation notes
+
+Current status
+
+- go.mod exists, so the project should be run with `go run .`.
+- Basic RESP marshaling tests exist in `resp_test.go`.
+- Basic command handler tests exist in `handler_test.go`.
+- RESP null values should marshal as `$-1\r\n`.
+- RESP errors should marshal as `-ERR message\r\n`.
+- AOF replay should only call its callback after a command was parsed successfully.
+
+Testing notes
+
+- Run all package tests with `go test .`.
+- Run all tests with names printed using `go test -v .`.
+- Run one test by name with `go test -v -run TestValueMarshalNull .`.
+- Do not usually run `go test ./resp_test.go`; that compiles only that one file, so it cannot see types from `resp.go`.
+- A Go test function must start with `Test`, accept `t *testing.T`, and live in a file ending with `_test.go`.
+- A simple test usually has three steps: arrange input, act by calling the function, assert that the result matches what you expected.
+
+Immediate next changes
+
+1. Make sure `go test .` passes.
+2. Make sure `go run .` starts without crashing when the AOF file is empty.
+3. Refactor `main.go` so connection handling lives in a separate `handleConnection` function.
+4. Change the server accept logic to loop forever and start one goroutine per client.
+5. Keep one RESP reader and one RESP writer per connection.
+6. Write successful mutating commands like SET and HSET to the AOF.
+7. Add AOF tests with a temporary file.
+
+Next feature ideas
+
+- DEL key: remove a string key.
+- EXISTS key: return whether a key exists.
+- EXPIRE key seconds: give a key a time limit.
+- TTL key: show how many seconds are left before expiration.
+- HGETALL hash: return every field and value in a hash.
+- HDEL hash field: delete one field from a hash.
+
+Later feature ideas
+
+- Add list commands such as LPUSH, RPUSH, LPOP, RPOP, LRANGE, and LLEN.
+- Add pipelining so clients can send many commands without waiting between each command.
+- Add transactions with MULTI, EXEC, and DISCARD.
+- Add AOF rewrite so the persistence file does not grow forever.
+- Add snapshot persistence so the database can load faster on startup.
+- Add integration tests that connect to the TCP server like a real Redis client.

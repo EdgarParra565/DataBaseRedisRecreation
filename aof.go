@@ -17,7 +17,7 @@ type Aof struct {
 
 // NewAof opens or creates an append-only file for command persistence.
 func NewAof(path string) (*Aof, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
 	}
@@ -63,17 +63,23 @@ func (aof *Aof) Read(callback func(value Value)) error {
 	aof.mu.Lock()
 	defer aof.mu.Unlock()
 
+	if _, err := aof.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
 	resp := NewResp(aof.file)
 
 	for {
 		value, err := resp.Read()
-		if err != nil {
-			callback(value)
-		}
 		if err == io.EOF {
 			break
 		}
-		return err
+		if err != nil {
+			return err
+		}
+
+		callback(value)
 	}
+
 	return nil
 }

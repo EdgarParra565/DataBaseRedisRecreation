@@ -76,7 +76,7 @@ func (r *Resp) Read() (Value, error) {
 	case BULK:
 		return r.readBulk()
 	default:
-		fmt.Println("Unknown type: %v", string(_type))
+		fmt.Println("Unknown type:", string(_type))
 		return Value{}, nil
 	}
 }
@@ -136,6 +136,8 @@ func (v Value) Marshal() []byte {
 		return v.marshalNull()
 	case "error":
 		return v.marshalError()
+	case "integer":
+		return v.marshalInteger()
 	default:
 		return []byte{}
 	}
@@ -180,17 +182,17 @@ func (v *Value) marshalString() []byte {
 
 // marshalNull converts a null value into RESP null bytes.
 func (v *Value) marshalNull() []byte {
-	var bytes []byte
-	bytes = append(bytes, ERROR)
-	bytes = append(bytes, v.str...)
-	bytes = append(bytes, '\r', '\n')
-
-	return bytes
+	return []byte("$-1\r\n")
 }
 
 // marshalError converts an error value into RESP error bytes.
 func (v *Value) marshalError() []byte {
-	return []byte("ERROR")
+	return []byte("-ERR " + v.str + "\r\n")
+}
+
+// marshalInteger converts an integer value into RESP integer bytes.
+func (v *Value) marshalInteger() []byte {
+	return []byte(":" + strconv.Itoa(v.num) + "\r\n")
 }
 
 // Writer writes RESP values to an output stream.

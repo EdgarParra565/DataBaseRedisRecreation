@@ -5,12 +5,15 @@ A small Redis-like database server written in Go. The project recreates a subset
 ## Features
 
 - TCP server listening on port `6379`
+- Concurrent client handling with one goroutine per connection
 - RESP parser for arrays and bulk strings
-- RESP writer for strings, bulk strings, nulls, errors, and arrays
+- RESP writer for strings, bulk strings, integers, nulls, errors, and arrays
 - In-memory string storage with `SET` and `GET`
 - In-memory hash storage with `HSET` and `HGET`
+- Key existence checks with `EXISTS`
 - Basic `PING` command support
-- Append-only file helper for command persistence work
+- Append-only file persistence for successful mutating commands like `SET` and `HSET`
+- Unit tests for handlers, RESP marshaling, and AOF replay
 
 ## Supported Commands
 
@@ -19,6 +22,7 @@ A small Redis-like database server written in Go. The project recreates a subset
 | `PING` | `PING` | Returns `PONG`. |
 | `SET` | `SET name edgar` | Stores a string value by key. |
 | `GET` | `GET name` | Returns the value stored for a key. |
+| `EXISTS` | `EXISTS name` | Returns `1` if a string key or hash key exists, otherwise `0`. |
 | `HSET` | `HSET user:1 name edgar` | Stores a field value inside a hash. |
 | `HGET` | `HGET user:1 name` | Returns a field value from a hash. |
 
@@ -26,17 +30,19 @@ A small Redis-like database server written in Go. The project recreates a subset
 
 | File | Purpose |
 | --- | --- |
-| `main.go` | Starts the TCP server, accepts a client connection, reads RESP commands, and calls handlers. |
+| `go.mod` | Defines the Go module so the project can be run with `go run .`. |
+| `main.go` | Starts the TCP server, replays persisted commands, accepts client connections, and calls handlers. |
 | `resp.go` | Defines RESP values, parsing logic, marshaling logic, and response writing. |
 | `handler.go` | Defines command handlers and the in-memory stores used by commands. |
-| `aof.go` | Defines the append-only file helper used for persistence-related work. |
+| `aof.go` | Defines append-only file write and replay behavior. |
+| `*_test.go` | Contains unit tests for protocol output, handlers, and AOF replay. |
 
 ## Running the Server
 
-This project does not currently include a `go.mod` file, so run it by passing the Go files directly:
+Run the server from the project root:
 
 ```bash
-go run main.go resp.go handler.go aof.go
+go run .
 ```
 
 The server listens on:
@@ -61,11 +67,46 @@ SET name edgar
 GET name
 HSET user:1 name edgar
 HGET user:1 name
+EXISTS name
+EXISTS missing
 ```
 
-## Notes
+## Running Tests
 
-- The server currently accepts one client connection at a time.
-- Data is stored in memory while the server is running.
-- Append-only file support exists in `aof.go`, but persistence behavior is still a work in progress.
-- Only a small subset of Redis commands and RESP types is implemented.
+Run the full test suite:
+
+```bash
+go test -v .
+```
+
+Run one test by name:
+
+```bash
+go test -v -run TestValueMarshalInteger .
+```
+
+## Persistence
+
+The server writes successful mutating commands to `database.aof`. On startup, it replays commands from that file to rebuild the in-memory stores.
+
+Example manual persistence check:
+
+```bash
+redis-cli -p 6379 SET name edgar
+redis-cli -p 6379 GET name
+```
+
+Restart the server, then run:
+
+```bash
+redis-cli -p 6379 GET name
+```
+
+If AOF replay worked, the value should still be available.
+
+## Current Limitations
+
+- Only a small subset of Redis commands is implemented.
+- AOF persistence currently covers `SET` and `HSET`.
+- Expiration, deletion, lists, pub/sub, transactions, snapshots, and replication are not implemented yet.
+- RESP parsing currently focuses on the types needed by the supported commands.
