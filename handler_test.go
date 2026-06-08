@@ -119,3 +119,87 @@ func TestExistsMissingKey(t *testing.T) {
 		t.Fatalf("expected integer 0, got typ=%q num=%d", got.typ, got.num)
 	}
 }
+
+func TestDelStringKey(t *testing.T) {
+	resetStores()
+
+	set([]Value{
+		{typ: "bulk", bulk: "name"},
+		{typ: "bulk", bulk: "edgar"},
+	})
+
+	got := del([]Value{{typ: "bulk", bulk: "name"}})
+
+	if got.typ != "integer" || got.num != 1 {
+		t.Fatalf("expected integer 1, got typ=%q num=%d", got.typ, got.num)
+	}
+
+	if exists([]Value{{typ: "bulk", bulk: "name"}}).num != 0 {
+		t.Fatal("expected key to be deleted")
+	}
+}
+
+func TestIncrMissingKey(t *testing.T) {
+	resetStores()
+
+	got := incr([]Value{{typ: "bulk", bulk: "count"}})
+	if got.typ != "integer" || got.num != 1 {
+		t.Fatalf("expected integer 1, got typ=%q num=%d", got.typ, got.num)
+	}
+
+	stored := get([]Value{{typ: "bulk", bulk: "count"}})
+
+	if stored.bulk != "1" {
+		t.Fatal("expected stored value to be 1, got", stored.bulk)
+	}
+}
+
+func TestIncrExistingKey(t *testing.T) {
+	resetStores()
+
+	set([]Value{
+		{typ: "bulk", bulk: "count"},
+		{typ: "bulk", bulk: "10"},
+	})
+
+	got := incr([]Value{{typ: "bulk", bulk: "count"}})
+
+	if got.typ != "integer" || got.num != 11 {
+		t.Fatalf("expected integer 11, got typ=%q num=%d", got.typ, got.num)
+	}
+}
+
+func TestIncrBy(t *testing.T) {
+	resetStores()
+	set([]Value{
+		{typ: "bulk", bulk: "count"},
+		{typ: "bulk", bulk: "10"},
+	})
+
+	got := incrBy([]Value{
+		{typ: "bulk", bulk: "count"},
+		{typ: "bulk", bulk: "10"},
+	})
+
+	if got.typ != "integer" || got.num != 20 {
+		t.Fatalf("expected integer 20, got typ=%q num=%d", got.typ, got.num)
+	}
+}
+
+func TestIncrNonIntValue(t *testing.T) {
+	resetStores()
+
+	set([]Value{
+		{typ: "bulk", bulk: "name"},
+		{typ: "bulk", bulk: "edgar"},
+	})
+
+	got := incr([]Value{
+		{typ: "bulk", bulk: "name"},
+	})
+
+	if got.typ != "error" {
+		t.Fatalf("expected error, got typ=%q", got.typ)
+	}
+
+}

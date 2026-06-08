@@ -18,30 +18,20 @@ Testing notes
 - A Go test function must start with `Test`, accept `t *testing.T`, and live in a file ending with `_test.go`.
 - A simple test usually has three steps: arrange input, act by calling the function, assert that the result matches what you expected.
 
-Immediate next changes
 
-1. Make sure `go test .` passes.
-2. Make sure `go run .` starts without crashing when the AOF file is empty.
-3. Refactor `main.go` so connection handling lives in a separate `handleConnection` function.
-4. Change the server accept logic to loop forever and start one goroutine per client.
-5. Keep one RESP reader and one RESP writer per connection.
-6. Write successful mutating commands like SET and HSET to the AOF.
-7. Add AOF tests with a temporary file.
+What to Add Next
 
-Next feature ideas
+High value, relatively quick:
 
-- DEL key: remove a string key.
-- EXISTS key: return whether a key exists.
-- EXPIRE key seconds: give a key a time limit.
-- TTL key: show how many seconds are left before expiration.
-- HGETALL hash: return every field and value in a hash.
-- HDEL hash field: delete one field from a hash.
+TTL / EXPIRE — set an expiration on a key and have it automatically deleted after N seconds.
+This requires a background goroutine checking expiry which introduces real concurrency concepts.
+Impressive addition and directly relevant to how real Redis works.
 
-Later feature ideas
+Medium effort, high resume value:
+KEYS pattern matching — return all keys matching a glob pattern.
+Requires iterating your store and implementing basic pattern matching.
+Shows you understand Redis's data model more deeply.
 
-- Add list commands such as LPUSH, RPUSH, LPOP, RPOP, LRANGE, and LLEN.
-- Add pipelining so clients can send many commands without waiting between each command.
-- Add transactions with MULTI, EXEC, and DISCARD.
-- Add AOF rewrite so the persistence file does not grow forever.
-- Add snapshot persistence so the database can load faster on startup.
-- Add integration tests that connect to the TCP server like a real Redis client.
+Concurrent stress test — add a test that spins up multiple goroutines hitting the server simultaneously and verifies data integrity.
+This directly validates your concurrent client handling and is the kind of test a senior engineer would write.
+
