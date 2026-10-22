@@ -22,6 +22,12 @@ var Handlers = map[string]func([]Value) Value{
 	"EXPIRE": expire,
 	"TTL":    ttl,
 	"KEYS":   keys,
+	"VADD":   vadd,
+	"VGET":   vget,
+	"VDIM":   vdim,
+	"VSIM":   vsim,
+	"VSIMQ":  vsimq,
+	"VDEL":   vdel,
 	//"HGETALL": hgetall,
 }
 
@@ -56,6 +62,9 @@ func init() {
 					HSETsMu.Lock()
 					delete(HSETs, k)
 					HSETsMu.Unlock()
+					VECTORsMu.Lock()
+					delete(VECTORs, k)
+					VECTORsMu.Unlock()
 					delete(EXPIREs, k)
 				}
 			}
@@ -81,6 +90,10 @@ func cleanupIfExpired(key string) bool {
 		HSETsMu.Lock()
 		delete(HSETs, key)
 		HSETsMu.Unlock()
+
+		VECTORsMu.Lock()
+		delete(VECTORs, key)
+		VECTORsMu.Unlock()
 
 		EXPIREsMu.Lock()
 		delete(EXPIREs, key)
@@ -175,7 +188,7 @@ func hget(args []Value) Value {
 	return Value{typ: "bulk", bulk: value}
 }
 
-// exists returns 1 when a string key or hash key exists, otherwise 0.
+// exists returns 1 when a string, hash, or vector key exists, otherwise 0.
 func exists(args []Value) Value {
 	if len(args) != 1 {
 		return Value{typ: "error", str: "Too many arguments"}
@@ -193,14 +206,18 @@ func exists(args []Value) Value {
 	_, hashExists := HSETs[key]
 	HSETsMu.RUnlock()
 
-	if stringExists || hashExists {
+	VECTORsMu.RLock()
+	_, vectorExists := VECTORs[key]
+	VECTORsMu.RUnlock()
+
+	if stringExists || hashExists || vectorExists {
 		return Value{typ: "integer", num: 1}
 	}
 
 	return Value{typ: "integer", num: 0}
 }
 
-// del removes a string key or hash key.
+// del removes a string, hash, or vector key.
 func del(args []Value) Value {
 	if len(args) != 1 {
 		return Value{typ: "error", str: "Too many arguments"}
@@ -224,6 +241,13 @@ func del(args []Value) Value {
 		deleted = true
 	}
 	HSETsMu.Unlock()
+
+	VECTORsMu.Lock()
+	if _, ok := VECTORs[key]; ok {
+		delete(VECTORs, key)
+		deleted = true
+	}
+	VECTORsMu.Unlock()
 
 	EXPIREsMu.Lock()
 	if _, ok := EXPIREs[key]; ok {
@@ -302,7 +326,11 @@ func expire(args []Value) Value {
 	_, hashExists := HSETs[key]
 	HSETsMu.RUnlock()
 
-	if !stringExists && !hashExists {
+	VECTORsMu.RLock()
+	_, vectorExists := VECTORs[key]
+	VECTORsMu.RUnlock()
+
+	if !stringExists && !hashExists && !vectorExists {
 		return Value{typ: "integer", num: 0}
 	}
 
@@ -330,7 +358,11 @@ func ttl(args []Value) Value {
 	_, hashExists := HSETs[key]
 	HSETsMu.RUnlock()
 
-	if !stringExists && !hashExists {
+	VECTORsMu.RLock()
+	_, vectorExists := VECTORs[key]
+	VECTORsMu.RUnlock()
+
+	if !stringExists && !hashExists && !vectorExists {
 		return Value{typ: "integer", num: -2}
 	}
 
@@ -358,7 +390,7 @@ func keys(args []Value) Value {
 	}
 	pattern := args[0].bulk
 
-	// collect keys from both stores
+	// collect keys from all stores
 	set := map[string]struct{}{}
 
 	SETsMu.RLock()
@@ -372,6 +404,12 @@ func keys(args []Value) Value {
 		set[k] = struct{}{}
 	}
 	HSETsMu.RUnlock()
+
+	VECTORsMu.RLock()
+	for k := range VECTORs {
+		set[k] = struct{}{}
+	}
+	VECTORsMu.RUnlock()
 
 	// filter and sort for deterministic order
 	var matches []string

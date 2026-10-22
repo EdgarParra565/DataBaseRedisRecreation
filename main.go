@@ -108,7 +108,7 @@ func shouldPersist(command string, result Value) bool {
 	}
 
 	switch command {
-	case "SET", "HSET", "DEL", "INCR", "INCRBY", "EXPIRE":
+	case "SET", "HSET", "DEL", "INCR", "INCRBY", "EXPIRE", "VADD", "VDEL":
 		return true
 	default:
 		return false

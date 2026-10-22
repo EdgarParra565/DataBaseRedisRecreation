@@ -35,3 +35,109 @@ Shows you understand Redis's data model more deeply.
 Concurrent stress test — add a test that spins up multiple goroutines hitting the server simultaneously and verifies data integrity.
 This directly validates your concurrent client handling and is the kind of test a senior engineer would write.
 
+
+Plan: Vector type + similarity search
+
+Why: this is the core primitive behind AI retrieval / RAG. It fits AI-native database roles (e.g. ByteDance NoSQL).
+Keep the same patterns already in handler.go: a global map, an RWMutex, a handler func([]Value) Value, and an entry in Handlers.
+
+Command surface (modeled loosely on Redis 8 VSET / VADD / VSIM so it looks familiar):
+
+- VADD key dim f1 f2 ... fN            -> store a float32 vector under key. Returns :1 if new, :0 if replaced.
+- VGET key                              -> return the vector as a RESP array of bulk strings (one per float).
+- VDIM key                              -> return the dimension of the stored vector.
+- VSIM key k [METRIC COSINE|L2|DOT]     -> k nearest neighbours to the vector stored at key.
+- VSIMQ dim f1 ... fN k [METRIC ...]    -> k nearest neighbours to a raw query vector (what a RAG client actually calls).
+- VDEL key                              -> remove a vector. Also hook into DEL / EXISTS / KEYS / EXPIRE so vectors behave like any other key.
+
+Step 1 — storage
+- Add `var VECTORs = map[string][]float32{}` and `var VECTORsMu = sync.RWMutex{}` next to SETs / HSETs.
+- Parse floats with strconv.ParseFloat(s, 32). Reject if count != dim, or if dim <= 0.
+- Update the expiry goroutine, cleanupIfExpired, del, exists, expire, ttl, keys so they also look at VECTORs.
+- Consider adding a Value typ "double" to resp.go later; for now return scores as bulk strings with strconv.FormatFloat.
+
+Step 2 — distance functions (pure Go, no deps, put them in vector.go)
+- cosine(a, b)   = dot(a,b) / (norm(a) * norm(b)). Precompute and cache norm per stored vector so VSIM does not recompute it.
+- l2(a, b)       = sqrt(sum((a[i]-b[i])^2)). Can skip the sqrt when only ranking.
+- dot(a, b)      = sum(a[i]*b[i]).
+- Guard against mismatched dimensions: return "-ERR dimension mismatch".
+
+Step 3 — brute force search (ship this first)
+- Take VECTORsMu.RLock, loop over every vector, compute score, push into a slice of {key, score}.
+- Use container/heap as a bounded max-heap of size k so the search is O(n log k) instead of sorting everything.
+- Reply format: flat array [key1, score1, key2, score2, ...] like Redis WITHSCORES.
+- Brute force over 10k x 384-dim vectors is a few ms in Go, which is fine for a demo and easy to reason about.
+
+Step 4 — persistence
+- Add "VADD" and "VDEL" to shouldPersist in main.go so vectors survive a restart via the AOF.
+- AOF replay already calls the handler, so nothing else is needed once the handler exists.
+
+Step 5 — tests
+- vector_test.go: parse errors, dimension mismatch, cosine of identical vectors == 1, l2 of identical == 0, VSIM returns k results in sorted order, VSIM with k > n returns n.
+- Add a VADD/VSIM case to aof_test.go to prove replay.
+- Benchmark: BenchmarkVSIM with 10k random 128-dim vectors so there is a number to put in the readme.
+
+Step 6 — optional upgrades once brute force works (pick one, mention the rest as future work)
+- Index: HNSW is what Redis / pgvector / Milvus actually use. A minimal HNSW in Go is ~300 lines; alternatively an IVF (k-means buckets) is simpler to explain in an interview.
+- Metadata filtering: store a hash alongside the vector (reuse HSETs) and support `VSIM key k FILTER field value` so you can show hybrid search.
+- Quantization: store int8 instead of float32 to cut memory 4x; mention the recall tradeoff.
+- SIMD: Go has no intrinsics but unrolling the dot product loop by 4 or 8 gives a measurable speedup worth benchmarking.
+
+Demo for the readme
+- Small Python or Go script: embed a handful of sentences (sentence-transformers or any OpenAI-style embedding API), VADD each one, then VSIMQ a question and print the nearest sentences. That is RAG retrieval end-to-end on this server.
+
+
+Plan: MCP server for the Redis clone
+
+Why: lets an AI agent (Claude, Cursor, etc.) read and write this database through tools. Small scope, very current, and it demos best when paired with the vector feature above.
+
+Architecture
+- Separate binary in a subdirectory: cmd/mcp/main.go (module already exists, so `go run ./cmd/mcp`).
+- The MCP server is just a client of the TCP server. It opens a net.Conn to :6379, speaks RESP, and exposes each command as an MCP tool. No changes to handler.go are needed.
+- Transport: stdio (what Cursor / Claude Desktop launch). Optionally add streamable HTTP later.
+- Library options:
+  a) github.com/modelcontextprotocol/go-sdk  — official SDK, use this by default.
+  b) github.com/mark3labs/mcp-go             — popular community SDK, slightly simpler API.
+  c) Hand-roll JSON-RPC 2.0 over stdin/stdout — only initialize, tools/list, tools/call are required. Doable in ~200 lines and shows you understand the protocol, but more to maintain.
+
+Step 1 — reusable RESP client
+- Write client.go (or an internal/respclient package) with a Client struct wrapping net.Conn + the existing Resp reader and Writer.
+- Method: `Do(args ...string) (Value, error)` that marshals an array of bulk strings, writes it, and reads one reply.
+- Reuse Marshal / NewResp from resp.go. If keeping everything in package main is awkward, move resp.go into a small package (e.g. internal/resp) first.
+- Add a mutex so concurrent tool calls do not interleave on the single connection, or use a tiny connection pool.
+
+Step 2 — tools to expose (map 1:1 to commands, keep names lowercase_snake)
+- redis_get(key), redis_set(key, value), redis_del(key), redis_exists(key)
+- redis_hget(hash, field), redis_hset(hash, field, value)
+- redis_incr(key), redis_incrby(key, amount)
+- redis_expire(key, seconds), redis_ttl(key), redis_keys(pattern)
+- vector_add(key, vector []float), vector_search(vector []float, k, metric) once the vector feature exists
+- redis_raw(command, args[]) as an escape hatch, but mark it clearly in the description and consider an allowlist.
+- Each tool: JSON schema for inputs (go-sdk derives it from a struct with jsonschema tags), a one-sentence description the model will read, and a text result with the RESP reply converted to plain JSON.
+
+Step 3 — resources and prompts (optional but cheap)
+- Resource `redis://keys` that lists all keys, and `redis://key/{name}` that returns a value. Lets an agent browse without calling tools.
+- Prompt "summarize_store" that pulls KEYS * and asks the model to describe what is stored.
+
+Step 4 — safety
+- Flag --readonly to register only read tools.
+- Flag --allow-keys-prefix so an agent can only touch e.g. agent:* keys.
+- Never expose FLUSHALL style commands even if added later.
+
+Step 5 — wiring it into Cursor / Claude Desktop
+- Build: `go build -o bin/redis-mcp ./cmd/mcp`.
+- Add to .cursor/mcp.json (project) or the Claude Desktop config:
+    { "mcpServers": { "redis-clone": { "command": "/abs/path/bin/redis-mcp", "args": ["--addr", "localhost:6379"] } } }
+- Test with the MCP Inspector: `npx @modelcontextprotocol/inspector go run ./cmd/mcp`.
+
+Step 6 — tests
+- Unit test the Client.Do round trip against an in-process server (start main's listener on a random port in the test).
+- Table test for tool argument validation (missing key, non-integer amount).
+- One integration test that calls tools/list and tools/call over stdio using the SDK's in-memory transport.
+
+Suggested order
+1. Vector storage + brute force VSIM + tests (biggest resume payoff, independent of MCP).
+2. RESP client + MCP server with the string/hash tools.
+3. Add vector_add / vector_search tools to the MCP server and record a short demo of an agent storing notes and retrieving them by similarity.
+4. If time remains, HNSW or IVF index behind VSIM and a benchmark table in the readme.
+

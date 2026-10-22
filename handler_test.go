@@ -11,6 +11,10 @@ func resetStores() {
 	HSETsMu.Lock()
 	HSETs = map[string]map[string]string{}
 	HSETsMu.Unlock()
+
+	VECTORsMu.Lock()
+	VECTORs = map[string]Vector{}
+	VECTORsMu.Unlock()
 }
 
 func TestPing(t *testing.T) {
